@@ -49,6 +49,21 @@ def get_alibi_slopes(nheads):
             + get_alibi_slopes(2 * closest_power_of_2)[0::2][: nheads - closest_power_of_2]
         )
 
+class MultiHeadLayernorm(nn.Module):
+    def __init__(self, head_dim, num_heads, eps=1e-05, shared_normalization=False):
+        super().__init__()
+        if shared_normalization:
+            self._reduce_dims = (-2, -1)
+        else:
+            self._reduce_dims = (-1,)
+        self.gamma = nn.Parameter(torch.ones((num_heads, head_dim)))
+        self.beta = nn.Parameter(torch.zeros((num_heads, head_dim)))
+        self.eps = eps
+
+    def forward(self, x):
+        mean, var = torch.var_mean(x, dim=self._reduce_dims, keepdim=True)
+        x = (x - mean) / torch.sqrt(var + self.eps)
+        return self.gamma * x + self.beta
 
 class FlashSelfAttention(nn.Module):
     """Implement the scaled dot product attention with softmax.
@@ -69,6 +84,7 @@ class FlashSelfAttention(nn.Module):
         window_size=(-1, -1),
         alibi_slopes=None,
         deterministic=False,
+        qk_norm_kwargs=None,
     ):
         super().__init__()
         assert flash_attn_varlen_qkvpacked_func is not None, "FlashAttention is not installed"
@@ -79,6 +95,14 @@ class FlashSelfAttention(nn.Module):
         self.register_buffer("alibi_slopes", alibi_slopes, persistent=False)
         self.window_size = window_size
         self.deterministic = deterministic
+        if qk_norm_kwargs is not None:
+            self.qk_norm = True
+            self.q_layernorm = MultiHeadLayernorm(**qk_norm_kwargs)
+            self.k_layernorm = MultiHeadLayernorm(**qk_norm_kwargs)
+        else:
+            self.qk_norm = False
+            self.q_layernorm = None
+            self.k_layernorm = None
 
     def forward(self, qkv, causal=None, cu_seqlens=None, max_seqlen=None):
         """Implements the multihead softmax attention.
@@ -99,6 +123,15 @@ class FlashSelfAttention(nn.Module):
         """
         assert qkv.dtype in [torch.float16, torch.bfloat16]
         assert qkv.is_cuda
+        if self.qk_norm:
+            if cu_seqlens is None:
+                assert qkv.shape[2] == 3
+                qkv[:, :, 0] = self.q_layernorm(qkv[:, :, 0])
+                qkv[:, :, 0] = self.k_layernorm(qkv[:, :, 0])
+            else:
+                assert qkv.shape[1] == 3
+                qkv[:, 0] = self.q_layernorm(qkv[:, 0])
+                qkv[:, 0] = self.k_layernorm(qkv[:, 0])
         causal = self.causal if causal is None else causal
         unpadded = cu_seqlens is not None
         if unpadded:
@@ -401,6 +434,8 @@ class MHA(nn.Module):
         checkpointing=False,
         device=None,
         dtype=None,
+        qk_norm=False,
+        qk_norm_kwargs=None,
     ) -> None:
         """
         num_heads_kv: can be used to toggle MQA / GQA. If None, use num_heads.
@@ -408,6 +443,11 @@ class MHA(nn.Module):
             performance reason: for post-norm architecture, returning the input allows us
             to fuse the backward of nn.Linear with the residual connection.
         """
+        if qk_norm and (cross_attn or not use_flash_attn):
+            raise NotImplementedError('QK normalization is only implemented for flash self-attention.')
+        if qk_norm:
+            qk_norm_kwargs = qk_norm_kwargs if qk_norm_kwargs is not None else {}
+            qk_norm_kwargs.update({'num_heads': num_heads, 'head_dim': embed_dim  // num_heads})
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.embed_dim = embed_dim
@@ -456,7 +496,7 @@ class MHA(nn.Module):
         )
         wqkv_cls = linear_cls if not self.return_residual else linear_resid_cls
         inner_attn_cls = (
-            partial(FlashSelfAttention, alibi_slopes=alibi_slopes, window_size=window_size)
+            partial(FlashSelfAttention, alibi_slopes=alibi_slopes, window_size=window_size, qk_norm_kwargs=qk_norm_kwargs)
             if use_flash_attn
             else SelfAttention
         )
