@@ -61,7 +61,7 @@ class MultiHeadLayernorm(nn.Module):
         self.eps = eps
 
     def forward(self, x):
-        mean, var = torch.var_mean(x, dim=self._reduce_dims, keepdim=True)
+        var, mean = torch.var_mean(x, dim=self._reduce_dims, keepdim=True)
         x = (x - mean) / torch.sqrt(var + self.eps)
         return self.gamma * x + self.beta
 
