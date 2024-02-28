@@ -127,11 +127,11 @@ class FlashSelfAttention(nn.Module):
             if cu_seqlens is None:
                 assert qkv.shape[2] == 3
                 qkv[:, :, 0] = self.q_layernorm(qkv[:, :, 0])
-                qkv[:, :, 0] = self.k_layernorm(qkv[:, :, 0])
+                qkv[:, :, 1] = self.k_layernorm(qkv[:, :, 1])
             else:
                 assert qkv.shape[1] == 3
                 qkv[:, 0] = self.q_layernorm(qkv[:, 0])
-                qkv[:, 0] = self.k_layernorm(qkv[:, 0])
+                qkv[:, 1] = self.k_layernorm(qkv[:, 1])
         causal = self.causal if causal is None else causal
         unpadded = cu_seqlens is not None
         if unpadded:
