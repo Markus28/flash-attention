@@ -126,8 +126,8 @@ class FlashSelfAttention(nn.Module):
         if self.qk_norm:
             if cu_seqlens is None:
                 assert qkv.shape[2] == 3
-                q = self.q_layernorm(qkv[:, :, 0]).clone()
-                k = self.k_layernorm(qkv[:, :, 1]).clone()
+                q = self.q_layernorm(qkv[:, :, 0])
+                k = self.k_layernorm(qkv[:, :, 1])
                 v = qkv[:, :, 2]
                 qkv = torch.stack([q, k, v], dim=2)
             else:
