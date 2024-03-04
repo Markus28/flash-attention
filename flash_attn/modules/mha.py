@@ -126,15 +126,15 @@ class FlashSelfAttention(nn.Module):
         if self.qk_norm:
             if cu_seqlens is None:
                 assert qkv.shape[2] == 3
-                q = self.q_layernorm(qkv[:, :, 0])
-                k = self.k_layernorm(qkv[:, :, 1])
-                v = qkv[:, :, 2]
+                q, k, v = qkv.unbind(2)
+                q = self.q_layernorm(q)
+                k = self.k_layernorm(k)
                 qkv = torch.stack([q, k, v], dim=2)
             else:
                 assert qkv.shape[1] == 3
-                q = self.q_layernorm(qkv[:, 0])
-                k = self.k_layernorm(qkv[:, 1])
-                v = qkv[:, 2]
+                q, k, v = qkv.unbind(1)
+                q = self.q_layernorm(q)
+                k = self.k_layernorm(k)
                 qkv = torch.stack([q, k, v], dim=1)
         causal = self.causal if causal is None else causal
         unpadded = cu_seqlens is not None
