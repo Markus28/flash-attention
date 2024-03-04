@@ -56,14 +56,14 @@ class MultiHeadLayernorm(nn.Module):
             self._reduce_dims = (-2, -1)
         else:
             self._reduce_dims = (-1,)
-        self.gamma = nn.Parameter(torch.ones((num_heads, head_dim)))
-        self.beta = nn.Parameter(torch.zeros((num_heads, head_dim)))
+        self.weight = nn.Parameter(torch.ones((num_heads, head_dim)))
+        self.bias = nn.Parameter(torch.zeros((num_heads, head_dim)))
         self.eps = eps
 
     def forward(self, x):
         var, mean = torch.var_mean(x, dim=self._reduce_dims, keepdim=True)
         x = (x - mean) / torch.sqrt(var + self.eps)
-        return self.gamma * x + self.beta
+        return self.weight * x + self.bias
 
 class FlashSelfAttention(nn.Module):
     """Implement the scaled dot product attention with softmax.
