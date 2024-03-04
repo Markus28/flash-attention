@@ -126,15 +126,15 @@ class FlashSelfAttention(nn.Module):
         if self.qk_norm:
             if cu_seqlens is None:
                 assert qkv.shape[2] == 3
-                q = self.q_layernorm(qkv[:, :, 0])
-                k = self.k_layernorm(qkv[:, :, 1])
-                v = qkv[:, :, 2]
+                q, k, v = qkv.unbind(2)
+                q = self.q_layernorm(q)
+                k = self.k_layernorm(k)
                 qkv = torch.stack([q, k, v], dim=2)
             else:
                 assert qkv.shape[1] == 3
-                q = self.q_layernorm(qkv[:, 0])
-                k = self.k_layernorm(qkv[:, 1])
-                v = qkv[:, 2]
+                q, k, v = qkv.unbind(1)
+                q = self.q_layernorm(q)
+                k = self.k_layernorm(k)
                 qkv = torch.stack([q, k, v], dim=1)
         causal = self.causal if causal is None else causal
         unpadded = cu_seqlens is not None
@@ -274,8 +274,13 @@ class SelfAttention(nn.Module):
         attention_dropout: The dropout rate to apply to the attention
                            (default: 0.0)
     """
-
-    def __init__(self, causal=False, softmax_scale=None, attention_dropout=0.0, alibi_slopes=None):
+    def __init__(self,
+                 causal=False,
+                 softmax_scale=None,
+                 attention_dropout=0.0,
+                 alibi_slopes=None,
+                 qk_norm_kwargs=None,
+        ):
         super().__init__()
         self.causal = causal
         self.softmax_scale = softmax_scale
@@ -285,6 +290,14 @@ class SelfAttention(nn.Module):
             self.register_buffer('linear_biases', self._build_linear_biases(16), persistent=False)
         else:
             self.linear_biases = None
+        if qk_norm_kwargs is not None:
+            self.qk_norm = True
+            self.q_layernorm = MultiHeadLayernorm(**qk_norm_kwargs)
+            self.k_layernorm = MultiHeadLayernorm(**qk_norm_kwargs)
+        else:
+            self.qk_norm = False
+            self.q_layernorm = None
+            self.k_layernorm = None
 
     def _build_linear_biases(self, seqlen):
         context_position = torch.arange(seqlen, device=self.alibi_slopes.device)[:, None]
@@ -307,6 +320,9 @@ class SelfAttention(nn.Module):
         batch_size, seqlen = qkv.shape[0], qkv.shape[1]
         causal = self.causal if causal is None else causal
         q, k, v = qkv.unbind(dim=2)
+        if self.qk_norm:
+            q = self.q_layernorm(q)
+            k = self.k_layernorm(k)
         softmax_scale = self.softmax_scale or 1.0 / math.sqrt(q.shape[-1])
         scores = torch.einsum("bthd,bshd->bhts", q, k * softmax_scale)
         if key_padding_mask is not None:
@@ -470,8 +486,8 @@ class MHA(nn.Module):
             performance reason: for post-norm architecture, returning the input allows us
             to fuse the backward of nn.Linear with the residual connection.
         """
-        if qk_norm and (cross_attn or not use_flash_attn):
-            raise NotImplementedError('QK normalization is only implemented for flash self-attention.')
+        if qk_norm and cross_attn:
+            raise NotImplementedError('QK normalization is only implemented for self-attention.')
         if qk_norm:
             qk_norm_kwargs = qk_norm_kwargs if qk_norm_kwargs is not None else {}
             qk_norm_kwargs.update({'num_heads': num_heads, 'head_dim': embed_dim  // num_heads})
