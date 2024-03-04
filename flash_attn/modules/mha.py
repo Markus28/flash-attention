@@ -518,7 +518,7 @@ class MHA(nn.Module):
         inner_attn_cls = (
             partial(FlashSelfAttention, alibi_slopes=alibi_slopes, window_size=window_size, qk_norm_kwargs=qk_norm_kwargs)
             if use_flash_attn
-            else SelfAttention
+            else partial(SelfAttention, qk_norm_kwargs=qk_norm_kwargs)
         )
         inner_cross_attn_cls = (
             partial(FlashCrossAttention, alibi_slopes=alibi_slopes, window_size=window_size)
