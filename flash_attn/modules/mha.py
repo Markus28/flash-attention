@@ -665,7 +665,7 @@ class MHA(nn.Module):
                     if not self.checkpointing:
                         context = self.inner_attn(qkv, **kwargs)
                     else:
-                        context = torch.utils.checkpoint.checkpoint(self.inner_attn, qkv, **kwargs)
+                        context = torch.utils.checkpoint.checkpoint(self.inner_attn, qkv, use_reentrant=False, **kwargs)
                 else:
                     context = self._update_kvcache_attention(
                         qkv[:, :, 0], qkv[:, :, 1:], inference_params
@@ -717,7 +717,7 @@ class MHA(nn.Module):
                         context = self.inner_cross_attn(q, kv, **kwargs)
                     else:
                         context = torch.utils.checkpoint.checkpoint(
-                            self.inner_cross_attn, q, kv, **kwargs
+                            self.inner_cross_attn, q, kv, use_reentrant=False, **kwargs
                         )
                 else:
                     context = self._update_kvcache_attention(q, kv, inference_params)
